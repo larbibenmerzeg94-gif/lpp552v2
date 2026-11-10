@@ -1,0 +1,80 @@
+name: Compiler APK LPP 552 Automatiquement
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      supabase_url:
+        description: 'URL de votre projet Supabase (ex: https://xyz.supabase.co)'
+        required: true
+        default: 'https://VOTRE_PROJET.supabase.co'
+      supabase_anon_key:
+        description: 'Clé publique anonKey de votre projet Supabase'
+        required: true
+        default: 'VOTRE_CLE_ANON_SUPABASE'
+
+jobs:
+  build-android-apk:
+    name: Construction de LPP552-release.apk (Gratuit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Récupération des fichiers du dépôt
+        uses: actions/checkout@v4
+
+      - name: 2. Installation de Java 17 (requis pour Android Gradle & TTLock SDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 3. Installation de Flutter Stable
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.3'
+          channel: 'stable'
+          cache: true
+
+      - name: 4. Génération automatique du squelette Android si absent
+        run: |
+          if [ ! -d "android" ]; then
+            mkdir -p _backup_src
+            cp pubspec.yaml _backup_src/ 2>/dev/null || true
+            cp AndroidManifest.xml _backup_src/ 2>/dev/null || true
+            cp lpp552_service.dart _backup_src/ 2>/dev/null || true
+            cp main.dart _backup_src/ 2>/dev/null || true
+            cp lib/*.dart _backup_src/ 2>/dev/null || true
+
+            flutter create --org dz.lpp552 --project-name lpp552_app --platforms=android .
+
+            cp _backup_src/pubspec.yaml ./pubspec.yaml
+            mkdir -p lib
+            cp _backup_src/lpp552_service.dart ./lib/lpp552_service.dart
+            cp _backup_src/main.dart ./lib/main.dart
+            if [ -f "_backup_src/AndroidManifest.xml" ]; then
+              cp _backup_src/AndroidManifest.xml ./android/app/src/main/AndroidManifest.xml
+            fi
+            rm -rf _backup_src
+          fi
+          # Garantir minSdkVersion >= 23 pour ttlock_flutter et local_auth
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle 2>/dev/null || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle 2>/dev/null || true
+
+      - name: 5. Téléchargement des packages Flutter (Supabase + TTLock)
+        run: flutter pub get
+
+      - name: 6. Compilation de l'application Android (APK Release)
+        run: |
+          SUPABASE_URL="${{ github.event.inputs.supabase_url || vars.SUPABASE_URL || 'https://VOTRE_PROJET.supabase.co' }}"
+          SUPABASE_KEY="${{ github.event.inputs.supabase_anon_key || secrets.SUPABASE_ANON_KEY || 'VOTRE_CLE_ANON_SUPABASE' }}"
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_KEY"
+
+      - name: 7. Publication du fichier LPP552-release.apk prêt à télécharger
+        uses: actions/upload-artifact@v4
+        with:
+          name: LPP552-Application-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 90
